@@ -1,0 +1,5 @@
+project_name: iac_zson
+seed: 42
+max_steps: 500
+success_distance: 1.0
+

@@ -1,0 +1,7 @@
+tau_c: 0.5
+tau_e: 0.5
+tau_n: 0.5
+lambda_inst: 1.0
+lambda_cat: 1.0
+alpha: 0.5
+

@@ -1,0 +1,24 @@
+Mug:
+  - CounterTop
+  - DiningTable
+  - CoffeeTable
+  - Desk
+Bowl:
+  - CounterTop
+  - DiningTable
+  - CoffeeTable
+RemoteControl:
+  - CoffeeTable
+  - Sofa
+  - SideTable
+  - TVStand
+Towel:
+  - TowelHolder
+  - CounterTop
+  - SinkBasin
+Book:
+  - Shelf
+  - Desk
+  - CoffeeTable
+  - SideTable
+
