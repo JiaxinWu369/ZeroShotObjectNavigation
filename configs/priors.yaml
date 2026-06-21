@@ -1,24 +1,23 @@
 Mug:
-  - CounterTop
-  - DiningTable
-  - CoffeeTable
-  - Desk
+  CounterTop: 0.95
+  DiningTable: 0.85
+  CoffeeTable: 0.80
+  Desk: 0.70
 Bowl:
-  - CounterTop
-  - DiningTable
-  - CoffeeTable
+  CounterTop: 0.95
+  DiningTable: 0.85
+  CoffeeTable: 0.80
 RemoteControl:
-  - CoffeeTable
-  - Sofa
-  - SideTable
-  - TVStand
+  CoffeeTable: 0.95
+  Sofa: 0.90
+  SideTable: 0.85
+  TVStand: 0.80
 Towel:
-  - TowelHolder
-  - CounterTop
-  - SinkBasin
+  TowelHolder: 0.95
+  Sink: 0.85
+  CounterTop: 0.75
 Book:
-  - Shelf
-  - Desk
-  - CoffeeTable
-  - SideTable
-
+  Shelf: 0.95
+  Desk: 0.90
+  CoffeeTable: 0.80
+  SideTable: 0.75
