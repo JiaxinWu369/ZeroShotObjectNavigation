@@ -1,34 +1,43 @@
-"""Minimal AI2-THOR smoke test for FloorPlan1."""
+"""Minimal AI2-THOR sanity check for a cloud server."""
 
-from pathlib import Path
-import sys
+import argparse
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from iac_zson.env.thor_env import ThorEnvWrapper
+from ai2thor.controller import Controller
 
 
-def main() -> None:
-    env = ThorEnvWrapper(scene="FloorPlan1")
+def main(scene: str = "FloorPlan1") -> None:
+    controller = None
     try:
-        env.start()
-        objects = env.get_objects()
-        print(f"object count: {len(objects)}")
+        controller = Controller(
+            scene=scene,
+            width=300,
+            height=300,
+            gridSize=0.25,
+            renderDepthImage=False,
+            renderInstanceSegmentation=False,
+        )
+        controller.reset(scene=scene)
+        event = controller.step(action="RotateRight")
+
+        objects = event.metadata["objects"]
+        print("AI2-THOR started")
+        print(f"scene name: {event.metadata.get('sceneName', scene)}")
+        print(f"number of objects: {len(objects)}")
         for obj in objects[:5]:
             print(
                 f"objectId={obj['objectId']}, "
                 f"objectType={obj['objectType']}, "
-                f"visible={obj['visible']}"
+                f"visible={obj['visible']}, "
+                f"position={obj['position']}"
             )
-
-        env.step("RotateRight")
+        print(f"agent metadata: {event.metadata['agent']}")
     finally:
-        env.stop()
+        if controller is not None:
+            controller.stop()
 
 
 if __name__ == "__main__":
-    main()
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--scene", default="FloorPlan1")
+    args = parser.parse_args()
+    main(scene=args.scene)

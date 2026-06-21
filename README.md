@@ -18,3 +18,9 @@ project skeleton
 - 日志记录
 - 指标评估
 
+## Cloud AI2-THOR sanity check
+
+```bash
+bash scripts/cloud_setup_ai2thor.sh
+bash scripts/run_ai2thor_xvfb.sh
+```
