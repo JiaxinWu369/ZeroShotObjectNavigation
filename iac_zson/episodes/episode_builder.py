@@ -255,6 +255,13 @@ class DiagnosticEpisodeBuilder:
                     "p_sem": prior_scores.get(category, 0.1),
                 }
             )
+        candidates.sort(
+            key=lambda candidate: (
+                -candidate["p_sem"],
+                candidate["category"],
+                candidate["alias"],
+            )
+        )
         return candidates
 
     def _best_support(

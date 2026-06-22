@@ -1,23 +1,35 @@
 Mug:
   CounterTop: 0.95
-  DiningTable: 0.85
-  CoffeeTable: 0.80
-  Desk: 0.70
+  Sink: 0.75
+  Cabinet: 0.65
+  Shelf: 0.45
+  Drawer: 0.40
+  Fridge: 0.25
 Bowl:
-  CounterTop: 0.95
-  DiningTable: 0.85
-  CoffeeTable: 0.80
+  CounterTop: 0.90
+  Cabinet: 0.75
+  Sink: 0.65
+  Shelf: 0.45
+  Drawer: 0.35
+  Fridge: 0.25
 RemoteControl:
-  CoffeeTable: 0.95
-  Sofa: 0.90
-  SideTable: 0.85
-  TVStand: 0.80
+  Shelf: 0.55
+  Cabinet: 0.45
+  Drawer: 0.45
+  CounterTop: 0.40
+  Sink: 0.15
+  Fridge: 0.10
 Towel:
-  TowelHolder: 0.95
-  Sink: 0.85
-  CounterTop: 0.75
+  Sink: 0.80
+  Cabinet: 0.65
+  Drawer: 0.50
+  Shelf: 0.45
+  CounterTop: 0.35
+  Fridge: 0.15
 Book:
-  Shelf: 0.95
-  Desk: 0.90
-  CoffeeTable: 0.80
-  SideTable: 0.75
+  Shelf: 0.90
+  CounterTop: 0.65
+  Cabinet: 0.55
+  Drawer: 0.50
+  Fridge: 0.10
+  Sink: 0.05
