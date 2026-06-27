@@ -43,6 +43,10 @@ def _candidate_ids(candidates: list[Any]) -> set[str]:
 
 def _numeric_p_sem(candidate: Mapping[str, Any]) -> float | None:
     value = candidate.get("p_sem")
+    return _finite_number(value)
+
+
+def _finite_number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, Real):
         return None
     score = float(value)
@@ -99,10 +103,17 @@ def print_top_candidates(episode: Mapping[str, Any], episode_id: str) -> None:
         )
 
 
-def validate_episode(episode: dict[str, Any]) -> tuple[list[str], list[str]]:
+def validate_episode(
+    episode: dict[str, Any],
+) -> tuple[list[str], list[str], Counter[str]]:
     """Return validation errors and warnings for one episode."""
     errors = []
     warnings = []
+    warning_types: Counter[str] = Counter()
+
+    def add_warning(reason: str, warning_type: str) -> None:
+        warnings.append(reason)
+        warning_types[warning_type] += 1
 
     for field in REQUIRED_FIELDS:
         if field not in episode:
@@ -129,20 +140,31 @@ def validate_episode(episode: dict[str, Any]) -> tuple[list[str], list[str]]:
 
         instance_id = candidate.get("instance_id", f"index {index}")
         if "p_sem" not in candidate:
-            warnings.append(f"candidate {instance_id} is missing p_sem")
+            add_warning(
+                f"candidate {instance_id} is missing p_sem",
+                "missing_prior",
+            )
         elif _numeric_p_sem(candidate) is None:
-            warnings.append(f"candidate {instance_id} has non-numeric p_sem")
+            add_warning(
+                f"candidate {instance_id} has non-numeric p_sem",
+                "missing_prior",
+            )
 
         category = candidate.get("category")
         if category == "Floor":
-            warnings.append(f"candidate {instance_id} has Floor category")
+            add_warning(
+                f"candidate {instance_id} has Floor category",
+                "invalid_candidate",
+            )
         if category is not None and category == target_category:
-            warnings.append(
-                f"candidate {instance_id} has target object category {category}"
+            add_warning(
+                f"candidate {instance_id} has target object category {category}",
+                "invalid_candidate",
             )
         if candidate.get("pickupable", False):
-            warnings.append(
-                f"candidate {instance_id} has pickupable category {category}"
+            add_warning(
+                f"candidate {instance_id} has pickupable category {category}",
+                "invalid_candidate",
             )
 
     candidate_ids = _candidate_ids(candidates)
@@ -153,9 +175,24 @@ def validate_episode(episode: dict[str, Any]) -> tuple[list[str], list[str]]:
     true_p_sem = (
         _numeric_p_sem(true_candidate) if true_candidate is not None else None
     )
+    episode_true_p_sem = _finite_number(episode.get("true_support_p_sem"))
+    episode_true_rank = _finite_number(episode.get("true_support_rank"))
+    if episode_true_p_sem is None:
+        add_warning("true_support_p_sem is missing or non-numeric", "missing_prior")
+    elif episode_true_p_sem < 0.3:
+        add_warning(
+            f"true support {true_support_id} has low true_support_p_sem "
+            f"{episode_true_p_sem:.4f}",
+            "low_true_support_prior",
+        )
+    if episode_true_rank is None:
+        add_warning("true_support_rank is missing or non-numeric", "missing_prior")
+
     if true_p_sem is not None and true_p_sem < 0.3:
-        warnings.append(
-            f"true support {true_support_id} has low p_sem {true_p_sem:.4f}"
+        add_warning(
+            f"true support {true_support_id} has low candidate p_sem "
+            f"{true_p_sem:.4f}",
+            "low_true_support_prior",
         )
 
     if episode_type == "misleading-prior":
@@ -177,14 +214,47 @@ def validate_episode(episode: dict[str, Any]) -> tuple[list[str], list[str]]:
             if wrong_candidate is not None
             else None
         )
+        episode_wrong_p_sem = _finite_number(episode.get("wrong_instance_p_sem"))
+        episode_wrong_rank = _finite_number(episode.get("wrong_instance_rank"))
+        if episode_wrong_p_sem is None:
+            add_warning(
+                "wrong_instance_p_sem is missing or non-numeric",
+                "missing_prior",
+            )
+        if episode_wrong_rank is None:
+            add_warning(
+                "wrong_instance_rank is missing or non-numeric",
+                "missing_prior",
+            )
+        if (
+            episode_wrong_p_sem is not None
+            and episode_true_p_sem is not None
+            and episode_wrong_p_sem < episode_true_p_sem
+        ):
+            add_warning(
+                f"wrong_instance_p_sem {episode_wrong_p_sem:.4f} is lower "
+                f"than true_support_p_sem {episode_true_p_sem:.4f}",
+                "weak_wrong_prior",
+            )
+        if (
+            episode_wrong_rank is not None
+            and episode_true_rank is not None
+            and episode_wrong_rank >= episode_true_rank
+        ):
+            add_warning(
+                "weak_wrong_rank: wrong instance is not ranked before "
+                "true support",
+                "weak_wrong_rank",
+            )
         if (
             wrong_p_sem is not None
             and true_p_sem is not None
             and wrong_p_sem < true_p_sem
         ):
-            warnings.append(
+            add_warning(
                 f"wrong instance {wrong_id} p_sem {wrong_p_sem:.4f} is lower "
-                f"than true support p_sem {true_p_sem:.4f}"
+                f"than true support p_sem {true_p_sem:.4f}",
+                "weak_wrong_prior",
             )
     elif episode_type == "normal-prior":
         if wrong_id is not None:
@@ -196,7 +266,7 @@ def validate_episode(episode: dict[str, Any]) -> tuple[list[str], list[str]]:
     elif episode_type is not None:
         errors.append(f"unsupported episode_type: {episode_type}")
 
-    return errors, warnings
+    return errors, warnings, warning_types
 
 
 def validate_file(path: Path) -> dict[str, Any]:
@@ -210,6 +280,15 @@ def validate_file(path: Path) -> dict[str, Any]:
     candidate_counts = []
     error_count = 0
     warning_count = 0
+    warning_type_counts: Counter[str] = Counter(
+        {
+            "low_true_support_prior": 0,
+            "weak_wrong_prior": 0,
+            "weak_wrong_rank": 0,
+            "missing_prior": 0,
+            "invalid_candidate": 0,
+        }
+    )
 
     with path.open("r", encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
@@ -256,13 +335,19 @@ def validate_file(path: Path) -> dict[str, Any]:
             else:
                 candidate_counts.append(0)
 
-            errors, warnings = validate_episode(episode)
+            errors, warnings, warning_types = validate_episode(episode)
             error_count += len(errors)
             warning_count += len(warnings)
+            warning_type_counts.update(warning_types)
             for reason in errors:
                 print(f"ERROR {episode_id}: {reason}")
             for reason in warnings:
                 print(f"WARNING {episode_id}: {reason}")
+            print(
+                f"episode prior {episode_id}: "
+                f"true_support_p_sem={episode.get('true_support_p_sem')} "
+                f"true_support_rank={episode.get('true_support_rank')}"
+            )
             print_top_candidates(episode, str(episode_id))
 
     average_candidates = fmean(candidate_counts) if candidate_counts else 0.0
@@ -295,6 +380,7 @@ def validate_file(path: Path) -> dict[str, Any]:
         "p_sem_by_target_and_candidate": p_sem_by_target_and_candidate,
         "error_count": error_count,
         "warning_count": warning_count,
+        "warning_type_counts": dict(sorted(warning_type_counts.items())),
     }
     return report
 
@@ -331,6 +417,9 @@ def print_report(report: Mapping[str, Any]) -> None:
             )
     print(f"error count: {report['error_count']}")
     print(f"warning count: {report['warning_count']}")
+    print("total warnings by type:")
+    for warning_type, count in report["warning_type_counts"].items():
+        print(f"  {warning_type}: {count}")
 
 
 def main() -> None:

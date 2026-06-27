@@ -87,6 +87,7 @@ class DiagnosticEpisodeBuilder:
         allowed_categories: Iterable[str] | None = None,
         include_optional_categories: bool = False,
         target_categories: Sequence[str] = TARGET_CATEGORIES,
+        min_true_prior: float = 0.3,
     ) -> None:
         self.controller = controller
         self.priors = {
@@ -103,6 +104,7 @@ class DiagnosticEpisodeBuilder:
         if include_optional_categories:
             self.allowed_categories.update(OPTIONAL_ALLOWED_CATEGORIES)
         self.target_categories = tuple(target_categories)
+        self.min_true_prior = min_true_prior
 
     def build(self, scenes: Sequence[str]) -> list[DiagnosticEpisode]:
         episodes = []
@@ -149,8 +151,9 @@ class DiagnosticEpisodeBuilder:
                 true_category = supports_by_id[true_support_id]["object_type"]
                 if true_category not in self.allowed_categories:
                     print(
-                        f"WARNING {scene} {target_id}: true support category "
-                        f"{true_category} is not allowed; skipping episode"
+                        f"SKIP scene={scene} target={target_id} "
+                        f"reason=true_support_category_not_allowed "
+                        f"category={true_category}"
                     )
                     continue
 
@@ -167,35 +170,72 @@ class DiagnosticEpisodeBuilder:
                 }
                 if true_support_id not in candidate_ids:
                     print(
-                        f"WARNING {scene} {target_id}: true support "
-                        f"{true_support_id} was filtered; skipping episode"
+                        f"SKIP scene={scene} target={target_id} "
+                        f"reason=true_support_filtered "
+                        f"true_support_instance_id={true_support_id}"
                     )
                     continue
 
+                candidate_by_id = {
+                    candidate["instance_id"]: candidate
+                    for candidate in candidates
+                }
+                candidate_rank_by_id = {
+                    candidate["instance_id"]: rank
+                    for rank, candidate in enumerate(candidates, start=1)
+                }
+                true_support_p_sem = candidate_by_id[true_support_id][
+                    "p_sem"
+                ]
+                true_support_rank = candidate_rank_by_id[true_support_id]
                 episode_prefix = f"{scene}_{target_category}_{target_index:03d}"
 
                 if true_category in prior_scores:
-                    episodes.append(
-                        self._make_episode(
-                            episode_id=f"{episode_prefix}_normal_prior",
-                            scene=scene,
-                            target_category=target_category,
-                            episode_type="normal-prior",
-                            reachable_positions=reachable_positions,
-                            candidates=candidates,
-                            wrong_instance_id=None,
-                            true_support_instance_id=true_support_id,
-                            target_object_id=target_id,
+                    if true_support_p_sem < self.min_true_prior:
+                        print(
+                            f"SKIP scene={scene} target={target_id} "
+                            "skip normal: true support prior too low"
                         )
-                    )
+                    else:
+                        episodes.append(
+                            self._make_episode(
+                                episode_id=f"{episode_prefix}_normal_prior",
+                                scene=scene,
+                                target_category=target_category,
+                                episode_type="normal-prior",
+                                reachable_positions=reachable_positions,
+                                candidates=candidates,
+                                wrong_instance_id=None,
+                                true_support_instance_id=true_support_id,
+                                target_object_id=target_id,
+                                true_support_p_sem=true_support_p_sem,
+                                wrong_instance_p_sem=None,
+                                true_support_rank=true_support_rank,
+                                wrong_instance_rank=None,
+                            )
+                        )
 
-                wrong_id = self._find_wrong_instance(
-                    supports=candidate_supports,
+                if true_support_p_sem < self.min_true_prior:
+                    print(
+                        f"SKIP scene={scene} target={target_id} "
+                        "skip misleading: true support prior too low"
+                    )
+                    continue
+
+                wrong_candidate = self._find_wrong_candidate(
+                    candidates=candidates,
                     parent_ids=set(parent_ids),
-                    true_category=true_category,
-                    prior_scores=prior_scores,
+                    target_object_id=target_id,
+                    true_support_instance_id=true_support_id,
+                    true_support_rank=true_support_rank,
                 )
-                if wrong_id is not None:
+                if wrong_candidate is None:
+                    print(
+                        f"SKIP scene={scene} target={target_id} "
+                        "skip misleading: no wrong instance ranked before true support"
+                    )
+                else:
+                    wrong_id = wrong_candidate["instance_id"]
                     episodes.append(
                         self._make_episode(
                             episode_id=f"{episode_prefix}_misleading_prior",
@@ -207,6 +247,12 @@ class DiagnosticEpisodeBuilder:
                             wrong_instance_id=wrong_id,
                             true_support_instance_id=true_support_id,
                             target_object_id=target_id,
+                            true_support_p_sem=true_support_p_sem,
+                            wrong_instance_p_sem=wrong_candidate["p_sem"],
+                            true_support_rank=true_support_rank,
+                            wrong_instance_rank=candidate_rank_by_id[
+                                wrong_id
+                            ],
                         )
                     )
 
@@ -280,33 +326,24 @@ class DiagnosticEpisodeBuilder:
             ),
         )
 
-    def _find_wrong_instance(
-        self,
-        supports: list[dict],
+    @staticmethod
+    def _find_wrong_candidate(
+        candidates: list[dict],
         parent_ids: set[str],
-        true_category: str,
-        prior_scores: Mapping[str, float],
-    ) -> str | None:
-        eligible = [
-            support
-            for support in supports
-            if support["object_id"] is not None
-            and support["object_id"] not in parent_ids
-            and (
-                support["object_type"] == true_category
-                or support["object_type"] in prior_scores
-            )
-        ]
-        if not eligible:
-            return None
-        selected = min(
-            eligible,
-            key=lambda support: (
-                -prior_scores.get(support["object_type"], 0.1),
-                support["object_id"],
-            ),
-        )
-        return selected["object_id"]
+        target_object_id: str,
+        true_support_instance_id: str,
+        true_support_rank: int,
+    ) -> dict | None:
+        for rank, candidate in enumerate(candidates, start=1):
+            instance_id = candidate["instance_id"]
+            if (
+                rank < true_support_rank
+                and instance_id != true_support_instance_id
+                and instance_id != target_object_id
+                and instance_id not in parent_ids
+            ):
+                return candidate
+        return None
 
     def _make_episode(
         self,
@@ -319,6 +356,10 @@ class DiagnosticEpisodeBuilder:
         wrong_instance_id: str | None,
         true_support_instance_id: str,
         target_object_id: str,
+        true_support_p_sem: float | None = None,
+        wrong_instance_p_sem: float | None = None,
+        true_support_rank: int | None = None,
+        wrong_instance_rank: int | None = None,
     ) -> DiagnosticEpisode:
         position = dict(self.rng.choice(reachable_positions))
         start_pose = {
@@ -344,4 +385,8 @@ class DiagnosticEpisodeBuilder:
             target_object_id=target_object_id,
             max_steps=self.max_steps,
             success_distance=self.success_distance,
+            true_support_p_sem=true_support_p_sem,
+            wrong_instance_p_sem=wrong_instance_p_sem,
+            true_support_rank=true_support_rank,
+            wrong_instance_rank=wrong_instance_rank,
         )

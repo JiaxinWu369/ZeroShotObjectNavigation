@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Optional
 
 from iac_zson.planning.inspection_points import get_nearest_inspection_poses
 
@@ -21,7 +21,13 @@ class ControlledInspector:
         self.k = k
         self.rotations_per_pose = rotations_per_pose
 
-    def inspect(self, episode: Mapping[str, Any], selected_instance: Mapping[str, Any]) -> dict:
+    def inspect(
+        self,
+        episode: Mapping[str, Any],
+        selected_instance: Mapping[str, Any],
+        poses_per_decision: Optional[int] = None,
+        visited_viewpoint_ids: Optional[set] = None,
+    ) -> dict:
         reachable_event = self.controller.step(action="GetReachablePositions")
         reachable_positions = reachable_event.metadata.get("actionReturn") or []
         inspection_poses = get_nearest_inspection_poses(
@@ -32,10 +38,20 @@ class ControlledInspector:
         selected_instance_id = selected_instance["instance_id"]
         target_visible = False
         evidence_found = False
-        visited_count = 0
+        known_visited_viewpoint_ids = set(visited_viewpoint_ids or set())
+        newly_visited_viewpoint_ids = set()
         last_viewpoint_id = ""
 
-        for pose_index, pose in enumerate(inspection_poses):
+        pose_items = list(enumerate(inspection_poses))
+        if poses_per_decision is not None:
+            pose_items = [
+                (pose_index, pose)
+                for pose_index, pose in pose_items
+                if self._viewpoint_id(selected_instance_id, pose_index)
+                not in known_visited_viewpoint_ids
+            ][:poses_per_decision]
+
+        for pose_index, pose in pose_items:
             self.controller.step(
                 action="TeleportFull",
                 x=pose["x"],
@@ -49,8 +65,11 @@ class ControlledInspector:
             if not metadata.get("lastActionSuccess", True):
                 continue
 
-            visited_count += 1
-            last_viewpoint_id = f"{selected_instance_id}:inspection:{pose_index}"
+            last_viewpoint_id = self._viewpoint_id(
+                selected_instance_id, pose_index
+            )
+            known_visited_viewpoint_ids.add(last_viewpoint_id)
+            newly_visited_viewpoint_ids.add(last_viewpoint_id)
             visible_now, evidence_now = self._read_observation(
                 metadata, target_category, selected_instance_id
             )
@@ -68,6 +87,7 @@ class ControlledInspector:
                 evidence_found = evidence_found or evidence_now
 
         planned_count = len(inspection_poses)
+        visited_count = len(known_visited_viewpoint_ids)
         coverage = visited_count / planned_count if planned_count else 0.0
         return {
             "coverage": float(coverage),
@@ -76,7 +96,15 @@ class ControlledInspector:
             "finish_inspection": True,
             "visited_viewpoint_id": last_viewpoint_id,
             "num_inspection_poses": planned_count,
+            "visited_viewpoint_ids": known_visited_viewpoint_ids,
+            "newly_visited_viewpoint_ids": newly_visited_viewpoint_ids,
+            "total_inspection_poses": planned_count,
+            "num_visited_viewpoints": visited_count,
         }
+
+    @staticmethod
+    def _viewpoint_id(selected_instance_id: str, pose_index: int) -> str:
+        return f"{selected_instance_id}:inspection:{pose_index}"
 
     @staticmethod
     def _read_observation(
@@ -106,9 +134,13 @@ def run_controlled_inspection(
     selected_instance: Mapping[str, Any],
     k: int = 4,
     rotations_per_pose: int = 4,
+    poses_per_decision: Optional[int] = None,
+    visited_viewpoint_ids: Optional[set] = None,
 ) -> dict:
     """Convenience wrapper for one controlled inspection."""
     return ControlledInspector(controller, k, rotations_per_pose).inspect(
-        episode, selected_instance
+        episode,
+        selected_instance,
+        poses_per_decision=poses_per_decision,
+        visited_viewpoint_ids=visited_viewpoint_ids,
     )
-

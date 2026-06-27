@@ -62,6 +62,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-steps", type=int, default=150)
     parser.add_argument("--success-distance", type=float, default=1.5)
+    parser.add_argument("--min-true-prior", type=float, default=0.3)
     parser.add_argument("--include-optional-categories", action="store_true")
     args = parser.parse_args()
 
@@ -100,6 +101,7 @@ def main() -> None:
             success_distance=args.success_distance,
             include_optional_categories=args.include_optional_categories,
             target_categories=args.target_categories,
+            min_true_prior=args.min_true_prior,
         )
         episodes = limit_episodes(
             builder.build(scenes),

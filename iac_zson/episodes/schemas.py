@@ -22,7 +22,10 @@ class DiagnosticEpisode:
     target_object_id: str
     max_steps: int
     success_distance: float
+    true_support_p_sem: Optional[float] = None
+    wrong_instance_p_sem: Optional[float] = None
+    true_support_rank: Optional[int] = None
+    wrong_instance_rank: Optional[int] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
