@@ -268,6 +268,7 @@ def run_decisions(
     quiet: bool = False,
     partial_inspection: bool = False,
     poses_per_decision: int = 1,
+    progress: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     candidates_by_id = {
         candidate["instance_id"]: candidate
@@ -430,6 +431,9 @@ def run_decisions(
             "top_candidate_scores": top_candidate_scores,
         }
         logger.log_step(row)
+        if progress is not None:
+            progress["num_steps"] = len(selected_sequence)
+            progress["selected_sequence"] = list(selected_sequence)
         if not quiet:
             print(
                 f"step={step} selected_alias={selected.alias} "
@@ -496,6 +500,27 @@ def run_decisions(
     }
 
 
+def make_partial_failure_summary(
+    episode: dict[str, Any],
+    method: str,
+    error: Exception,
+    progress: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "episode_id": episode["episode_id"],
+        "method": METHOD_LABELS[method],
+        "success": False,
+        "error": str(error),
+        "num_steps": int(progress.get("num_steps", 0)),
+        "selected_sequence": list(progress.get("selected_sequence", [])),
+        "partial_failure": True,
+        "episode_type": episode.get("episode_type"),
+        "target_category": episode.get("target_category"),
+        "wrong_instance_id": episode.get("wrong_instance_id"),
+        "true_support_instance_id": episode.get("true_support_instance_id"),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -539,6 +564,7 @@ def main() -> None:
         args.output.parent, args.output.name, METHOD_LABELS[args.method]
     )
     controller = None
+    progress = {"num_steps": 0, "selected_sequence": []}
     try:
         from ai2thor.controller import Controller
 
@@ -551,18 +577,31 @@ def main() -> None:
             renderInstanceSegmentation=False,
         )
         inspector = ControlledInspector(controller)
-        summary = run_decisions(
-            episode=episode,
-            memory=memory,
-            inspector=inspector,
-            logger=logger,
-            max_decisions=args.max_decisions,
-            method=args.method,
-            beta_v=args.beta_v,
-            quiet=args.quiet,
-            partial_inspection=args.partial_inspection,
-            poses_per_decision=args.poses_per_decision,
-        )
+        try:
+            summary = run_decisions(
+                episode=episode,
+                memory=memory,
+                inspector=inspector,
+                logger=logger,
+                max_decisions=args.max_decisions,
+                method=args.method,
+                beta_v=args.beta_v,
+                quiet=args.quiet,
+                partial_inspection=args.partial_inspection,
+                poses_per_decision=args.poses_per_decision,
+                progress=progress,
+            )
+        except Exception as error:
+            summary = make_partial_failure_summary(
+                episode, args.method, error, progress
+            )
+            logger.save_summary(summary)
+            print(
+                f"method={args.method} episode_id={episode['episode_id']} "
+                f"success=False num_steps={summary['num_steps']} "
+                f"partial_failure=True error={error}"
+            )
+            return
         logger.save_summary(summary)
         if args.quiet:
             print(
@@ -572,6 +611,16 @@ def main() -> None:
         else:
             print(f"step log: {logger.step_log_path}")
             print(f"episode summary: {logger.summary_path}")
+    except Exception as error:
+        summary = make_partial_failure_summary(
+            episode, args.method, error, progress
+        )
+        logger.save_summary(summary)
+        print(
+            f"method={args.method} episode_id={episode['episode_id']} "
+            f"success=False num_steps={summary['num_steps']} "
+            f"partial_failure=True error={error}"
+        )
     finally:
         if controller is not None:
             controller.stop()

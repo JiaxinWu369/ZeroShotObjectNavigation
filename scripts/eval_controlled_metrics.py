@@ -30,9 +30,8 @@ def load_method_logs(
     logs = []
     for summary_path in sorted(method_dir.glob("*/episode_summary.json")):
         step_log_path = summary_path.parent / "step_log.jsonl"
-        if not step_log_path.exists():
-            continue
-        logs.append((read_json(summary_path), read_jsonl(step_log_path)))
+        step_logs = read_jsonl(step_log_path) if step_log_path.exists() else []
+        logs.append((read_json(summary_path), step_logs))
     return logs
 
 
@@ -103,30 +102,42 @@ def success_rate(summaries: list[dict[str, Any]]) -> float:
     return mean([1.0 if summary.get("success", False) else 0.0 for summary in summaries])
 
 
+def is_system_error(summary: dict[str, Any]) -> bool:
+    num_steps = int(summary.get("num_steps", 0) or 0)
+    success = bool(summary.get("success", False))
+    return "error" in summary or (num_steps == 0 and not success)
+
+
 def evaluate_method(
     method: str,
     method_logs: list[tuple[dict[str, Any], list[dict[str, Any]]]],
 ) -> dict[str, Any]:
     summaries = [summary for summary, _ in method_logs]
+    valid_logs = [
+        (summary, step_logs)
+        for summary, step_logs in method_logs
+        if not is_system_error(summary)
+    ]
+    valid_summaries = [summary for summary, _ in valid_logs]
     normal_summaries = [
         summary
-        for summary in summaries
+        for summary in valid_summaries
         if summary.get("episode_type") == "normal-prior"
     ]
     misleading_summaries = [
         summary
-        for summary in summaries
+        for summary in valid_summaries
         if summary.get("episode_type") == "misleading-prior"
     ]
     misleading_logs = [
         (summary, step_logs)
-        for summary, step_logs in method_logs
+        for summary, step_logs in valid_logs
         if summary.get("episode_type") == "misleading-prior"
     ]
 
     reliability_drops = [
         float(summary["reliability_drop_wrong"])
-        for summary in summaries
+        for summary in valid_summaries
         if summary.get("reliability_drop_wrong") is not None
     ]
     misleading_reliability_drops = [
@@ -136,12 +147,12 @@ def evaluate_method(
     ]
     final_reliabilities = [
         float(summary["final_reliability_wrong"])
-        for summary in summaries
+        for summary in valid_summaries
         if summary.get("final_reliability_wrong") is not None
     ]
     final_true_support_reliabilities = [
         reliability
-        for summary, step_logs in method_logs
+        for summary, step_logs in valid_logs
         if (
             reliability := get_final_reliability(
                 summary,
@@ -158,11 +169,29 @@ def evaluate_method(
     return {
         "method": method,
         "total_episodes": len(summaries),
+        "error_count": sum(1 for summary in summaries if is_system_error(summary)),
+        "valid_episodes": len(valid_summaries),
+        "success_rate_all": success_rate(summaries),
         "success_rate": success_rate(summaries),
-        "normal_success_rate": success_rate(normal_summaries),
-        "misleading_success_rate": success_rate(misleading_summaries),
+        "success_rate_valid": success_rate(valid_summaries),
+        "normal_success_rate": success_rate(
+            [
+                summary
+                for summary in summaries
+                if summary.get("episode_type") == "normal-prior"
+            ]
+        ),
+        "normal_success_rate_valid": success_rate(normal_summaries),
+        "misleading_success_rate": success_rate(
+            [
+                summary
+                for summary in summaries
+                if summary.get("episode_type") == "misleading-prior"
+            ]
+        ),
+        "misleading_success_rate_valid": success_rate(misleading_summaries),
         "avg_steps": mean(
-            [float(summary.get("num_steps", 0)) for summary in summaries]
+            [float(summary.get("num_steps", 0)) for summary in valid_summaries]
         ),
         "avg_steps_misleading": mean(
             [
@@ -173,7 +202,7 @@ def evaluate_method(
         "avg_wrong_inspections_all": mean(
             [
                 float(count_wrong_inspections(summary, step_logs))
-                for summary, step_logs in method_logs
+                for summary, step_logs in valid_logs
             ]
         ),
         "avg_wrong_inspections_misleading": mean(
@@ -206,7 +235,7 @@ def evaluate_method(
             ]
         ),
         "avg_spf_trigger_count": mean(
-            [float(count_spf_triggers(step_logs)) for _, step_logs in method_logs]
+            [float(count_spf_triggers(step_logs)) for _, step_logs in valid_logs]
         ),
         "avg_spf_trigger_count_misleading": mean(
             [
@@ -227,9 +256,15 @@ def print_markdown_table(rows: list[dict[str, Any]]) -> None:
     columns = [
         "method",
         "total_episodes",
+        "error_count",
+        "valid_episodes",
+        "success_rate_all",
         "success_rate",
+        "success_rate_valid",
         "normal_success_rate",
+        "normal_success_rate_valid",
         "misleading_success_rate",
+        "misleading_success_rate_valid",
         "avg_steps",
         "avg_steps_misleading",
         "avg_wrong_inspections_all",
