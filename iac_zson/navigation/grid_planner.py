@@ -11,9 +11,15 @@ from typing import Any
 class GridPlanner:
     """Build a simple 4-neighbor grid graph from reachable positions."""
 
-    def __init__(self, controller: Any, grid_size: float = 0.25) -> None:
+    def __init__(
+        self,
+        controller: Any,
+        grid_size: float = 0.25,
+        debug: bool = False,
+    ) -> None:
         self.controller = controller
         self.grid_size = grid_size
+        self.debug = debug
         self.reachable_positions = self._get_reachable_positions()
         self.nodes = {
             self._to_key(position): position
@@ -72,6 +78,25 @@ class GridPlanner:
     def _heuristic(a: tuple[int, int], b: tuple[int, int]) -> int:
         return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
+    def _debug(self, message: str) -> None:
+        if self.debug:
+            print(message)
+
+    def _is_valid_path(self, path: list[dict[str, float]]) -> bool:
+        tolerance = max(1e-4, self.grid_size * 0.2)
+        for current, next_position in zip(path, path[1:]):
+            distance = self._distance_xz(current, next_position)
+            if abs(distance - self.grid_size) > tolerance:
+                self._debug(
+                    "invalid path edge: "
+                    f"current position={current}, "
+                    f"next position={next_position}, "
+                    f"distance={distance:.4f}, "
+                    f"grid_size={self.grid_size:.4f}"
+                )
+                return False
+        return True
+
     def shortest_path(
         self,
         start_position: dict[str, float],
@@ -121,7 +146,10 @@ class GridPlanner:
             path_keys.append(current)
             current = came_from[current]
         path_keys.reverse()
-        return [self._from_key(key) for key in path_keys]
+        path = [self._from_key(key) for key in path_keys]
+        if not self._is_valid_path(path):
+            return []
+        return path
 
     @staticmethod
     def _normalize_yaw(rotation_y: float) -> int:
@@ -166,8 +194,28 @@ class GridPlanner:
             rotate_actions, current_yaw = self._rotation_actions(
                 current_yaw, target_yaw
             )
+            step_actions = list(rotate_actions)
+            if current_yaw != target_yaw:
+                self._debug(
+                    "invalid yaw before MoveAhead: "
+                    f"current position={start}, "
+                    f"next position={end}, "
+                    f"desired yaw={target_yaw}, "
+                    f"current yaw={current_yaw}, "
+                    f"generated actions={step_actions}"
+                )
+                return []
             actions.extend(rotate_actions)
             actions.append("MoveAhead")
+            step_actions.append("MoveAhead")
+            self._debug(
+                "path action step: "
+                f"current position={start}, "
+                f"next position={end}, "
+                f"desired yaw={target_yaw}, "
+                f"current yaw={current_yaw}, "
+                f"generated actions={step_actions}"
+            )
         return actions
 
 

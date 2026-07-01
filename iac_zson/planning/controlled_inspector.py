@@ -16,10 +16,34 @@ class ControlledInspector:
         controller: Any,
         k: int = 4,
         rotations_per_pose: int = 4,
+        reachable_positions: Optional[list[dict[str, float]]] = None,
     ) -> None:
         self.controller = controller
         self.k = k
         self.rotations_per_pose = rotations_per_pose
+        self.reachable_positions = reachable_positions
+        self.inspection_pose_cache: dict[str, list[dict[str, float]]] = {}
+
+    def _get_reachable_positions(self) -> list[dict[str, float]]:
+        if self.reachable_positions is None:
+            reachable_event = self.controller.step(action="GetReachablePositions")
+            self.reachable_positions = reachable_event.metadata.get("actionReturn") or []
+        return self.reachable_positions
+
+    def _get_inspection_poses(
+        self,
+        selected_instance: Mapping[str, Any],
+    ) -> list[dict[str, float]]:
+        selected_instance_id = selected_instance["instance_id"]
+        if selected_instance_id not in self.inspection_pose_cache:
+            self.inspection_pose_cache[selected_instance_id] = (
+                get_nearest_inspection_poses(
+                    selected_instance["position"],
+                    self._get_reachable_positions(),
+                    self.k,
+                )
+            )
+        return self.inspection_pose_cache[selected_instance_id]
 
     def inspect(
         self,
@@ -28,11 +52,7 @@ class ControlledInspector:
         poses_per_decision: Optional[int] = None,
         visited_viewpoint_ids: Optional[set] = None,
     ) -> dict:
-        reachable_event = self.controller.step(action="GetReachablePositions")
-        reachable_positions = reachable_event.metadata.get("actionReturn") or []
-        inspection_poses = get_nearest_inspection_poses(
-            selected_instance["position"], reachable_positions, self.k
-        )
+        inspection_poses = self._get_inspection_poses(selected_instance)
 
         target_category = episode["target_category"]
         selected_instance_id = selected_instance["instance_id"]
